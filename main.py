@@ -10,7 +10,7 @@ st.set_page_config(page_title="날씨별 자전거 대여량 예측", layout="wi
 st.title("🚲 날씨 데이터 기반 자전거 대여량 예측 (선형회귀)")
 st.write("기온, 습도, 풍속 등 날씨 데이터를 바탕으로 자전거 대여량을 예측하는 AI 모델입니다.")
 
-# 2. 깃허브에서 데이터 불러오기
+# 2. 깃허브에서 데이터 불러오기 (데이터 타입 오류 방지 기능 포함)
 @st.cache_data
 def load_data():
     bike_url = "https://raw.githubusercontent.com/jangyeonu913-ui/app2/refs/heads/main/bike.csv"
@@ -19,13 +19,22 @@ def load_data():
     bike = pd.read_csv(bike_url)
     weather = pd.read_csv(weather_url)
     
-    # 두 데이터의 공통 컬럼(날짜/시간 등)을 기준으로 병합
+    # 공통 컬럼 찾기
     common_cols = list(set(bike.columns) & set(weather.columns))
+    
     if common_cols:
-        df = pd.merge(bike, weather, on=common_cols[0])
+        key_col = common_cols[0]
+        # 데이터 타입을 둘 다 문자열(str)로 맞춰서 타입 불일치 오류 방지
+        bike[key_col] = bike[key_col].astype(str)
+        weather[key_col] = weather[key_col].astype(str)
+        df = pd.merge(bike, weather, on=key_col)
     else:
-        # 공통 컬럼 이름이 다를 경우 첫 번째 컬럼을 기준으로 병합
-        df = pd.merge(bike, weather, left_on=bike.columns[0], right_on=weather.columns[0])
+        left_key = bike.columns[0]
+        right_key = weather.columns[0]
+        bike[left_key] = bike[left_key].astype(str)
+        weather[right_key] = weather[right_key].astype(str)
+        df = pd.merge(bike, weather, left_on=left_key, right_on=right_key)
+        
     return df
 
 try:
