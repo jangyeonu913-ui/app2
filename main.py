@@ -30,29 +30,39 @@ try:
         st.write("**날씨 데이터 (weather.csv)**")
         st.dataframe(weather_df.head(5))
 
-    # 2. 데이터 병합 설정 (사용자가 직접 공통 컬럼 선택 가능하도록 구성)
+    # 2. 데이터 병합 설정 (각각의 날짜 열을 직접 매칭)
     st.subheader("2. 데이터 병합 및 모델 설정")
-    common_cols = list(set(bike_df.columns).intersection(set(weather_df.columns)))
     
-    if not common_cols:
-        st.error("두 데이터에 공통으로 존재하는 열(예: 날짜, datetime 등)이 없습니다. 열 이름을 확인해주세요.")
+    col_a, col_b = st.columns(2)
+    with col_a:
+        bike_key = st.selectbox("자전거 데이터의 기준 열 선택:", bike_df.columns, index=0)
+    with col_b:
+        # weather.csv의 '일시' 컬럼을 기본값으로 자동 선택하도록 설정
+        default_weather_idx = list(weather_df.columns).index("일시") if "일시" in weather_df.columns else 0
+        weather_key = st.selectbox("날씨 데이터의 기준 열 선택:", weather_df.columns, index=default_weather_idx)
+
+    # 두 데이터 병합
+    merged_df = pd.merge(bike_df, weather_df, left_on=bike_key, right_on=weather_key)
+    
+    st.write(f"병합된 데이터 미리보기 (총 데이터 수: {len(merged_df)}행)")
+    st.dataframe(merged_df.head(3))
+
+    # 숫자형 데이터만 추출
+    numeric_cols = merged_df.select_dtypes(include=['number']).columns.tolist()
+    
+    if not numeric_cols:
+        st.error("분석할 수 있는 숫자형 데이터가 부족합니다.")
     else:
-        merge_key = st.selectbox("두 데이터를 합칠 기준 열(공통 열)을 선택하세요:", common_cols)
-        merged_df = pd.merge(bike_df, weather_df, on=merge_key)
+        target_col = st.selectbox("예측할 목표(타겟) 열을 선택하세요:", numeric_cols, index=numeric_cols.index('대여건수') if '대여건수' in numeric_cols else 0)
         
-        # 숫자형 데이터만 추출
-        numeric_cols = merged_df.select_dtypes(include=['number']).columns.tolist()
-        
-        target_col = st.selectbox("예측할 목표(타겟) 열을 선택하세요 (예: 대여량/count):", numeric_cols)
         feature_cols = st.multiselect(
             "예측에 사용할 날씨/조건 열(특성)을 선택하세요:", 
             [c for c in numeric_cols if c != target_col],
-            default=[c for c in numeric_cols if c != target_col][:2]
+            default=[c for c in numeric_cols if c != target_col][:1] # 기본으로 평균기온 등이 선택되도록
         )
 
         # 3. 선형회귀 모델 학습 및 결과 출력
         if feature_cols and target_col:
-            # 결측치(빈칸) 제거
             clean_df = merged_df[feature_cols + [target_col]].dropna()
             X = clean_df[feature_cols]
             y = clean_df[target_col]
@@ -79,7 +89,7 @@ try:
             if st.button("예측하기"):
                 input_df = pd.DataFrame([input_data])
                 prediction = model.predict(input_df)[0]
-                st.success(f"예상되는 **{target_col}** 값은 약 **{prediction:.1f}** 입니다!")
+                st.success(f"예상되는 **{target_col}** 값은 약 **{prediction:.1f}** 건 입니다!")
 
 except Exception as e:
     st.error(f"데이터를 불러오거나 처리하는 중 오류가 발생했습니다: {e}")
