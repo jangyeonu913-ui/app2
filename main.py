@@ -10,7 +10,7 @@ st.set_page_config(page_title="날씨별 자전거 대여량 예측", layout="wi
 st.title("🚲 날씨 데이터 기반 자전거 대여량 예측 (선형회귀)")
 st.write("기온, 습도, 풍속 등 날씨 데이터를 바탕으로 자전거 대여량을 예측하는 AI 모델입니다.")
 
-# 2. 깃허브에서 데이터 불러오기 및 스마트 병합
+# 2. 데이터 불러오기
 @st.cache_data
 def load_data():
     bike_url = "https://raw.githubusercontent.com/jangyeonu913-ui/app2/refs/heads/main/bike.csv"
@@ -18,49 +18,62 @@ def load_data():
     
     bike = pd.read_csv(bike_url)
     weather = pd.read_csv(weather_url)
-    
-    # 공통 컬럼 찾기
-    common_cols = list(set(bike.columns) & set(weather.columns))
-    
-    if common_cols:
-        key_col = common_cols[0]
-        # 앞뒤 공백 및 하이픈(-) 등을 제거해 형식 통일 후 병합
-        bike['merge_key'] = bike[key_col].astype(str).str.strip().str.replace('-', '', regex=False).str.replace('/', '', regex=False)
-        weather['merge_key'] = weather[key_col].astype(str).str.strip().str.replace('-', '', regex=False).str.replace('/', '', regex=False)
-        df = pd.merge(bike, weather, on='merge_key', suffixes=('', '_weather'))
-    else:
-        left_key = bike.columns[0]
-        right_key = weather.columns[0]
-        bike['merge_key'] = bike[left_key].astype(str).str.strip().str.replace('-', '', regex=False).str.replace('/', '', regex=False)
-        weather['merge_key'] = weather[right_key].astype(str).str.strip().str.replace('-', '', regex=False).str.replace('/', '', regex=False)
-        df = pd.merge(bike, weather, on='merge_key', suffixes=('', '_weather'))
-        
-    return df
+    return bike, weather
 
 try:
-    df = load_data()
+    bike_df, weather_df = load_data()
 except Exception as e:
     st.error(f"데이터를 불러오는 중 오류가 발생했습니다: {e}")
     st.stop()
 
-# 3. 데이터 미리보기
-with st.expander("📊 병합된 원본 데이터 미리보기"):
-    st.write(f"총 데이터 행 개수: {len(df)}개")
+# 3. 사이드바에서 병합 기준 열 선택 (수동 매칭 기능)
+st.sidebar.header("⚙️ 데이터 병합 설정")
+st.sidebar.info("두 파일에서 서로 공통으로 들어있는 열(날짜, ID 등)을 각각 선택해주세요.")
+
+bike_key = st.sidebar.selectbox("1️⃣ bike.csv 기준 열 선택:", bike_df.columns.tolist())
+weather_key = st.sidebar.selectbox("2️⃣ weather.csv 기준 열 선택:", weather_df.columns.tolist())
+
+# 데이터 병합 수행
+bike_copy = bike_df.copy()
+weather_copy = weather_df.copy()
+
+bike_copy['join_key'] = bike_copy[bike_key].astype(str).str.strip()
+weather_copy['join_key'] = weather_copy[weather_key].astype(str).str.strip()
+
+df = pd.merge(bike_copy, weather_copy, on='join_key', suffixes=('', '_weather'))
+
+# 병합된 데이터가 0개일 때 원본을 보여주어 진단할 수 있도록 함
+if len(df) == 0:
+    st.error(f"⚠️ 선택한 기준 열(`{bike_key}`와 `{weather_key}`)로 일치하는 데이터를 찾지 못했습니다 (현재 0개). 아래 원본 데이터를 참고하여 올바른 기준 열을 사이드바에서 다시 선택해주세요.")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        st.subheader("📁 bike.csv 원본 미리보기")
+        st.dataframe(bike_df.head())
+    with col2:
+        st.subheader("📁 weather.csv 원본 미리보기")
+        st.dataframe(weather_df.head())
+    st.stop()
+
+# 4. 데이터 미리보기
+with st.expander("📊 병합된 원본 데이터 미리보기 (성공!)"):
+    st.write(f"총 매칭된 데이터 행 개수: {len(df)}개")
     st.dataframe(df.head(10))
 
-# 4. 모델 학습을 위한 변수 설정 (숫자형 데이터만 자동 추출)
+# 5. 모델 학습을 위한 변수 설정 (숫자형 데이터만 자동 추출)
 numeric_cols = df.select_dtypes(include=['int64', 'float64']).columns.tolist()
 
 if len(numeric_cols) < 2:
     st.warning("학습에 사용할 수 있는 숫자형 데이터가 충분하지 않습니다.")
     st.stop()
 
-st.sidebar.header("⚙️ 모델 설정")
+st.sidebar.markdown("---")
+st.sidebar.header("⚙️ AI 모델 설정")
 default_target = next((col for col in numeric_cols if 'count' in col.lower() or 'cnt' in col.lower() or '대여' in col), numeric_cols[-1])
 target_col = st.sidebar.selectbox("예측할 목표 값 (Y):", numeric_cols, index=numeric_cols.index(default_target))
 
-feature_options = [col for col in numeric_cols if col != target_col]
-selected_features = st.sidebar.multiselect("학습에 사용할 날씨 조건 (X):", feature_options, default=feature_options)
+feature_options = [col for col in numeric_cols if col != target_col and col != 'join_key']
+selected_features = st.sidebar.multiselect("학습에 사용할 날씨 조건 (X):", feature_options, default=feature_options[:min(5, len(feature_options))])
 
 if not selected_features:
     st.warning("왼쪽 사이드바에서 최소 1개 이상의 날씨 조건(X)을 선택해주세요.")
@@ -70,7 +83,7 @@ if not selected_features:
 clean_df = df[selected_features + [target_col]].dropna()
 
 if len(clean_df) < 5:
-    st.error(f"⚠️ 병합된 데이터에 유효한 행이 부족합니다 (현재 {len(clean_df)}개). 두 파일의 날짜/시간 형식을 확인해주세요.")
+    st.error(f"⚠️ 유효한 행이 부족합니다 (현재 {len(clean_df)}개).")
     st.stop()
 
 X = clean_df[selected_features]
@@ -78,12 +91,12 @@ y = clean_df[target_col]
 
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
-# 5. 선형회귀 모델 학습
+# 6. 선형회귀 모델 학습
 model = LinearRegression()
 model.fit(X_train, y_train)
 y_pred = model.predict(X_test)
 
-# 6. 결과 대시보드 출력
+# 7. 결과 대시보드 출력
 col1, col2 = st.columns(2)
 
 with col1:
