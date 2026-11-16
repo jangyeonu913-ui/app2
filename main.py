@@ -5,8 +5,9 @@ from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_squared_error, r2_score
 
 # 페이지 기본 설정
-st.set_page_config(page_title="자전거 대여량 예측 및 시각화", layout="centered")
-st.title("🚲 날씨에 따른 자전거 대여량 예측 및 시각화")
+st.set_page_config(page_title="공공자전거 이용 분석 앱", layout="centered")
+st.title("🚲 언제 공공자전거를 가장 많이 탈까? (날씨 분석 앱)")
+st.write("날씨와 날짜 데이터를 분석하여 공공자전거 대여 수요를 파악하고 예측하는 앱입니다.")
 
 # 1. 깃허브 Raw 데이터 불러오기
 bike_url = "https://raw.githubusercontent.com/jangyeonu913-ui/app2/refs/heads/main/bike.csv"
@@ -21,60 +22,47 @@ def load_data():
 try:
     bike_df, weather_df = load_data()
     
-    st.subheader("1. 원본 데이터 확인")
-    col1, col2 = st.columns(2)
-    with col1:
-        st.write("**자전거 데이터 (bike.csv)**")
-        st.dataframe(bike_df.head(3))
-    with col2:
-        st.write("**날씨 데이터 (weather.csv)**")
-        st.dataframe(weather_df.head(3))
-
-    # 2. 데이터 병합 설정
-    st.subheader("2. 데이터 병합 및 시각화")
-    
+    # 2. 데이터 병합 설정 (기준 열 선택)
+    st.subheader("1. 데이터 연결 설정")
     col_a, col_b = st.columns(2)
     with col_a:
-        bike_key = st.selectbox("자전거 데이터의 기준 열 선택:", bike_df.columns, index=0)
+        bike_key = st.selectbox("자전거 데이터 기준 열:", bike_df.columns, index=0)
     with col_b:
         default_weather_idx = list(weather_df.columns).index("일시") if "일시" in weather_df.columns else 0
-        weather_key = st.selectbox("날씨 데이터의 기준 열 선택:", weather_df.columns, index=default_weather_idx)
+        weather_key = st.selectbox("날씨 데이터 기준 열:", weather_df.columns, index=default_weather_idx)
 
     # 두 데이터 병합
     merged_df = pd.merge(bike_df, weather_df, left_on=bike_key, right_on=weather_key)
-    
-    st.write(f"병합된 데이터 미리보기 (총 데이터 수: {len(merged_df)}행)")
-    st.dataframe(merged_df.head(3))
+    st.success(f"데이터 병합 완료! (총 {len(merged_df)}일간의 데이터)")
 
-    # [그래프 추가 1] 날짜별 대여건수 변화 막대/선 그래프
+    # [핵심 분석 1] 대여 건수가 가장 많은 날 TOP 5 분석
+    st.subheader("🏆 공공자전거 이용이 가장 활발했던 날 TOP 5")
     if '대여건수' in merged_df.columns and bike_key in merged_df.columns:
-        st.markdown("### 📊 날짜별 자전거 대여건수 추이")
-        chart_data = merged_df.set_index(bike_key)[['대여건수']]
-        st.bar_chart(chart_data)  # 막대 그래프로 표현
+        top_bikes = merged_df.sort_values(by='대west' if 'west' in merged_df.columns else '대여건수', ascending=False).head(5) if '대여건수' not in merged_df.columns else merged_df.sort_values(by='대여건수', ascending=False).head(5)
+        
+        # 보기 깔끔하게 출력할 컬럼 선택
+        display_cols = [c for c in [bike_key, '대여건수', '평균기온(℃)'] if c in merged_df.columns]
+        st.dataframe(top_bikes[display_cols].reset_index(drop=True))
 
-    # 숫자형 데이터만 추출
+    # [핵심 분석 2] 날짜별 대여건수 추이 그래프
+    st.subheader("📊 날짜별 자전거 대여건수 변화 추이")
+    if '대여건수' in merged_df.columns:
+        chart_data = merged_df.set_index(bike_key)[['대여건수']]
+        st.line_chart(chart_data)
+
+    # [핵심 분석 3] 선형회귀를 통한 날씨-대여량 관계 분석
+    st.subheader("🤖 날씨 조건에 따른 대여량 예측 (선형회귀 모델)")
     numeric_cols = merged_df.select_dtypes(include=['number']).columns.tolist()
     
-    if not numeric_cols:
-        st.error("분석할 수 있는 숫자형 데이터가 부족합니다.")
-    else:
-        target_col = st.selectbox("예측할 목표(타겟) 열을 선택하세요:", numeric_cols, index=numeric_cols.index('대여건수') if '대여건수' in numeric_cols else 0)
-        
+    if '대여건수' in numeric_cols:
+        target_col = '대여건수'
         feature_cols = st.multiselect(
-            "예측에 사용할 날씨/조건 열(특성)을 선택하세요:", 
+            "분석 및 예측에 사용할 날씨 요인 선택:", 
             [c for c in numeric_cols if c != target_col],
-            default=[c for c in numeric_cols if c != target_col][:1]
+            default=['평균기온(℃)'] if '평균기온(℃)' in numeric_cols else [c for c in numeric_cols if c != target_col][:1]
         )
 
-        # [그래프 추가 2] 선택한 특성과 대여량 간의 관계 산점도
         if feature_cols:
-            st.markdown("### 📈 선택한 날씨 요인과 대여건수의 관계")
-            for f_col in feature_cols:
-                st.write(f"**{f_col} vs {target_col}**")
-                st.scatter_chart(merged_df[[f_col, target_col]], x=f_col, y=target_col)
-
-        # 3. 선형회귀 모델 학습 및 결과 출력
-        if feature_cols and target_col:
             clean_df = merged_df[feature_cols + [target_col]].dropna()
             X = clean_df[feature_cols]
             y = clean_df[target_col]
@@ -85,28 +73,25 @@ try:
             model.fit(X_train, y_train)
             y_pred = model.predict(X_test)
 
-            st.subheader("3. 선형회귀 모델 학습 결과")
             r2 = r2_score(y_test, y_pred)
-            mse = mean_squared_error(y_test, y_pred)
-            st.write(f"- **결정계수 ($R^2$ Score):** `{r2:.4f}` (1에 가까울수록 예측력이 높음)")
-            st.write(f"- **평균제곱오차 (MSE):** `{mse:.2f}`")
+            st.info(f"💡 **모델 분석 결과**: 선택한 날씨 요인이 자전거 대여량을 약 **{r2*100:.1f}%** 설명할 수 있습니다 ($R^2$ 점수: {r2:.4f})")
 
-            # [그래프 추가 3] 실제 값 vs 예측 값 비교 그래프
-            st.markdown("### 📉 테스트 데이터의 실제 값 vs 예측 값 비교")
-            result_df = pd.DataFrame({'실제값': y_test.values, '예측값': y_pred}).reset_index(drop=True)
-            st.line_chart(result_df)
+            # 산점도 그래프
+            for f_col in feature_cols:
+                st.write(f"📈 **[{f_col}]과 [대여건수]의 상관관계 산점도**")
+                st.scatter_chart(merged_df[[f_col, target_col]], x=f_col, y=target_col)
 
-            # 4. 실시간 예측 시뮬레이터
-            st.subheader("4. 직접 값을 입력해 대여량 예측해보기")
+            # [핵심 분석 4] 실시간 예측 시뮬레이터
+            st.subheader("🔮 미래 날씨 입력해서 자전거 대여량 예측해보기")
             input_data = {}
             for col in feature_cols:
                 mean_val = float(X[col].mean())
-                input_data[col] = st.number_input(f"{col} 입력", value=mean_val)
+                input_data[col] = st.number_input(f"예측할 {col} 값 입력", value=mean_val)
 
-            if st.button("예측하기"):
+            if st.button("대여량 예측하기"):
                 input_df = pd.DataFrame([input_data])
                 prediction = model.predict(input_df)[0]
-                st.success(f"예상되는 **{target_col}** 값은 약 **{prediction:.1f}** 건 입니다!")
+                st.success(f"✨ 해당 날씨 조건에서의 예상 자전거 대여 건수는 약 **{max(0, prediction):.0f}건** 입니다!")
 
 except Exception as e:
-    st.error(f"데이터를 불러오거나 처리하는 중 오류가 발생했습니다: {e}")
+    st.error(f"데이터를 처리하는 동안 오류가 발생했습니다: {e}")
