@@ -55,7 +55,7 @@ if len(numeric_cols) < 2:
     st.stop()
 
 st.sidebar.header("⚙️ 모델 설정")
-# 예측할 목표 변수(Y) 선택 (기본값: 마지막 숫자 컬럼 또는 'count'/'cnt' 등)
+# 예측할 목표 변수(Y) 선택
 default_target = next((col for col in numeric_cols if 'count' in col.lower() or 'cnt' in col.lower() or '대여' in col), numeric_cols[-1])
 target_col = st.sidebar.selectbox("예측할 목표 값 (Y):", numeric_cols, index=numeric_cols.index(default_target))
 
@@ -67,8 +67,16 @@ if not selected_features:
     st.warning("왼쪽 사이드바에서 최소 1개 이상의 날씨 조건(X)을 선택해주세요.")
     st.stop()
 
-# 결측치 제거 및 데이터 분리
+# 결측치 제거 및 데이터 분리 (데이터 부족 에러 방지 안전장치 추가)
 clean_df = df[selected_features + [target_col]].dropna()
+
+if len(clean_df) < 10:
+    st.error(f"⚠️ 병합된 데이터에 유효한 행이 부족합니다 (현재 {len(clean_df)}개). 두 CSV 파일의 공통 열(날짜 등) 데이터가 올바르게 매칭되는지 확인해주세요.")
+    with st.expander("🔍 디버깅용 병합 데이터 확인"):
+        st.write("bike.csv 및 weather.csv 병합 결과 크기:", df.shape)
+        st.dataframe(df.head())
+    st.stop()
+
 X = clean_df[selected_features]
 y = clean_df[target_col]
 
@@ -110,4 +118,4 @@ with col2:
     input_df = pd.DataFrame([input_data])
     prediction = model.predict(input_df)[0]
     
-    st.success(f"### 예상 {target_col}: **{max(0, prediction):,.0f}**")
+    st.success(f"### 예상 {target_col}: **{max(0
